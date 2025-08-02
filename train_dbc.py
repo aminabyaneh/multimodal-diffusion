@@ -1,6 +1,6 @@
 import hydra
 import os
-import sys
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -10,11 +10,11 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from realworld_dataset import RealWorldImageDataset
+from src.realworld_dataset import RealWorldImageDataset
 from cleandiffuser.dataset.dataset_utils import loop_dataloader
 from cleandiffuser.utils import report_parameters
 
-from utils import set_seed, Logger
+from src.utils import set_seed, Logger
 
 @hydra.main(config_path="configs/dbc", config_name="realworld_image")
 def pipeline(args):

@@ -18,7 +18,6 @@ import torch
 from omegaconf import OmegaConf
 
 from cleandiffuser.env.wrapper import VideoRecordingWrapper
-from datetime import datetime
 
 
 def parse_cfg(cfg_path: str) -> OmegaConf:
@@ -123,6 +122,11 @@ class Logger:
             _d[category + "/" + k] = v
 
         self._wandb.log(_d, step=d['step'])
+
+    def save_agent(self, agent=None, identifier='final'):
+        if agent:
+            fp = self._model_dir / f'model_{str(identifier)}.pt'
+        agent.save(fp)
 
     def finish(self):
         """

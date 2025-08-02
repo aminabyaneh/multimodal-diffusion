@@ -69,6 +69,9 @@ log_freq: 2000
 save_freq: 20000
 log_dir: logs
 
+# eval
+model_path: ckpt/edm_pearce_mlp/models/model_500000.pth
+
 # hydra
 hydra:
   job:

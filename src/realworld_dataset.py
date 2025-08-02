@@ -374,7 +374,6 @@ def _convert_data_to_replay(store, shape_meta, dataset_path, abs_action, rotatio
                 )
                 assert this_data.shape == (n_steps,) + tuple(shape_meta['action']['shape'])
             else:
-                print(key, n_steps, shape_meta['obs'][key]['shape'], this_data.shape)
                 assert this_data.shape == (n_steps,) + tuple(shape_meta['obs'][key]['shape'])
             _ = data_group.array(
                 name=key,

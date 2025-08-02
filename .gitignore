@@ -1,3 +1,4 @@
+# Local exclusions
 ckpt/
 libs/
 dev_pipelines/
@@ -6,6 +7,7 @@ outputs/
 /results
 /wandb
 *.pt
+
 # *.ipynb
 *.gif
 *.mp4
