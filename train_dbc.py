@@ -1,22 +1,24 @@
-import hydra
 import os
+import pdb
+import time
+import hydra
+import pathlib
 
 import warnings
 warnings.filterwarnings('ignore')
 
-import pathlib
-import time
 import numpy as np
-import torch
-from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from src.realworld_dataset import RealWorldImageDataset
+import torch
+
 from cleandiffuser.dataset.dataset_utils import loop_dataloader
 from cleandiffuser.utils import report_parameters
 
 from src.utils import set_seed, Logger
+from src.realworld_dataset import RealWorldImageDataset
 
-@hydra.main(config_path="configs/dbc", config_name="realworld_image")
+
+@hydra.main(config_path="configs/dbc", config_name="realworld_image_eef_pos")
 def pipeline(args):
     # ---------------- Create Logger ----------------
     set_seed(args.seed)
@@ -27,6 +29,7 @@ def pipeline(args):
     dataset = RealWorldImageDataset(dataset_path, horizon=args.horizon, shape_meta=args.shape_meta,
                                     n_obs_steps=args.obs_steps, pad_before=args.obs_steps-1,
                                     pad_after=args.action_steps-1, abs_action=args.abs_action)
+
     print(dataset)
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -37,7 +40,7 @@ def pipeline(args):
         persistent_workers=True
     )
 
-   # --------------- Create Diffusion Model -----------------
+    # --------------- Create Diffusion Model -----------------
     if args.nn == "pearce_mlp":
         from cleandiffuser.nn_condition import MultiImageObsCondition
         from cleandiffuser.nn_diffusion import PearceMlp
@@ -47,6 +50,7 @@ def pipeline(args):
             shape_meta=args.shape_meta, emb_dim=256, rgb_model_name=args.rgb_model, resize_shape=args.resize_shape,
             crop_shape=args.crop_shape, random_crop=args.random_crop,
             use_group_norm=args.use_group_norm, use_seq=args.use_seq).to(args.device)
+
     elif args.nn == "dit":
         from cleandiffuser.nn_condition import MultiImageObsCondition
         from cleandiffuser.nn_diffusion import DiT1d
@@ -71,10 +75,11 @@ def pipeline(args):
         from cleandiffuser.diffusion.edm import EDM
         agent = EDM(nn_diffusion=nn_diffusion, nn_condition=nn_condition, device=args.device,
                     optim_params={"lr": args.lr})
+
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(agent.optimizer, T_max=args.gradient_steps)
     else:
         raise NotImplementedError
 
-    lr_scheduler = CosineAnnealingLR(agent.optimizer, T_max=args.gradient_steps)
 
     if args.mode == "train":
         # ----------------- Training ----------------------

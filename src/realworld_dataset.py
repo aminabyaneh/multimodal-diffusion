@@ -8,10 +8,10 @@ import zarr
 from tqdm import tqdm
 import concurrent.futures
 from collections import defaultdict
-from cleandiffuser.dataset.imagecodecs import register_codecs, Png, Apng, Spng, Jpeg2k
+from cleandiffuser.dataset.imagecodecs import register_codecs, Jpeg2k
 from cleandiffuser.dataset.base_dataset import BaseDataset
 from cleandiffuser.dataset.replay_buffer import ReplayBuffer
-from cleandiffuser.dataset.dataset_utils import SequenceSampler, EmptyNormalizer, RotationTransformer, dict_apply, \
+from cleandiffuser.dataset.dataset_utils import SequenceSampler, RotationTransformer, dict_apply, \
     MinMaxNormalizer, ImageNormalizer
 
 register_codecs()
@@ -25,11 +25,8 @@ class RealWorldDataset(BaseDataset):
                  pad_after=0,
                  obs_keys=('ee_pose', 'ee_quat', 'gripper_state'),
                  abs_action=False,
-                 rotation_rep='rotation_6d',
                  ):
         super().__init__()
-        self.rotation_transformer = RotationTransformer(
-            from_rep='axis_angle', to_rep=rotation_rep)
 
         self.replay_buffer = ReplayBuffer.create_empty_numpy()
         with h5py.File(dataset_dir) as file:
@@ -40,8 +37,7 @@ class RealWorldDataset(BaseDataset):
                     raw_obs=demo['obs'],
                     raw_actions=demo['actions'][:].astype(np.float32),
                     obs_keys=obs_keys,
-                    abs_action=abs_action,
-                    rotation_transformer=self.rotation_transformer)
+                    abs_action=abs_action)
                 self.replay_buffer.add_episode(episode)
 
         self.sampler = SequenceSampler(
@@ -66,7 +62,7 @@ class RealWorldDataset(BaseDataset):
         pos = action[..., :3]
         rot = action[..., 3:3 + d_rot]
         gripper = action[..., [-1]]
-        rot = self.rotation_transformer.inverse(rot)
+
         uaction = np.concatenate([
             pos, rot, gripper
         ], axis=-1)
@@ -118,7 +114,7 @@ class RealWorldDataset(BaseDataset):
         return torch_data
 
 
-def _data_to_obs(raw_obs, raw_actions, obs_keys, abs_action, rotation_transformer):
+def _data_to_obs(raw_obs, raw_actions, obs_keys, abs_action):
     raw_obs_list = [
         np.array(raw_obs[key]) for key in obs_keys
     ]
@@ -135,7 +131,7 @@ def _data_to_obs(raw_obs, raw_actions, obs_keys, abs_action, rotation_transforme
         pos = raw_actions[..., :3]
         rot = raw_actions[..., 3:6]
         gripper = raw_actions[..., 6:]
-        rot = rotation_transformer.forward(rot)
+
         raw_actions = np.concatenate([
             pos, rot, gripper
         ], axis=-1).astype(np.float32)
@@ -159,18 +155,14 @@ class RealWorldImageDataset(BaseDataset):
                  pad_before=0,
                  pad_after=0,
                  abs_action=False,
-                 rotation_rep='rotation_6d',
                  ):
         super().__init__()
-        self.rotation_transformer = RotationTransformer(
-            from_rep='axis_angle', to_rep=rotation_rep)
 
         self.replay_buffer = _convert_data_to_replay(
             store=zarr.MemoryStore(),
             shape_meta=shape_meta,
             dataset_path=dataset_dir,
-            abs_action=abs_action,
-            rotation_transformer=self.rotation_transformer)
+            abs_action=abs_action)
 
         rgb_keys = list()
         lowdim_keys = list()
@@ -271,7 +263,7 @@ class RealWorldImageDataset(BaseDataset):
         pos = action[..., :3]
         rot = action[..., 3:3 + d_rot]
         gripper = action[..., [-1]]
-        rot = self.rotation_transformer.inverse(rot)
+
         uaction = np.concatenate([
             pos, rot, gripper
         ], axis=-1)
@@ -283,7 +275,7 @@ class RealWorldImageDataset(BaseDataset):
         return uaction
 
 
-def _convert_actions(raw_actions, abs_action, rotation_transformer):
+def _convert_actions(raw_actions, abs_action, action_shape):
     actions = raw_actions
     if abs_action:
         is_dual_arm = False
@@ -295,7 +287,7 @@ def _convert_actions(raw_actions, abs_action, rotation_transformer):
         pos = raw_actions[..., :3]
         rot = raw_actions[..., 3:6]
         gripper = raw_actions[..., 6:]
-        rot = rotation_transformer.forward(rot)
+
         raw_actions = np.concatenate([
             pos, rot, gripper
         ], axis=-1).astype(np.float32)
@@ -303,10 +295,10 @@ def _convert_actions(raw_actions, abs_action, rotation_transformer):
         if is_dual_arm:
             raw_actions = raw_actions.reshape(-1, 20)
         actions = raw_actions
-    return actions
+    return actions[:, :action_shape]
 
 
-def _convert_data_to_replay(store, shape_meta, dataset_path, abs_action, rotation_transformer,
+def _convert_data_to_replay(store, shape_meta, dataset_path, abs_action,
                                  n_workers=None, max_inflight_tasks=None):
 
     import multiprocessing
@@ -327,8 +319,8 @@ def _convert_data_to_replay(store, shape_meta, dataset_path, abs_action, rotatio
             rgb_keys.append(key)
         elif type == 'low_dim':
             lowdim_keys.append(key)
-    # rgb_keys = ['agentview_image', 'robot0_eye_in_hand_image']
-    # lowdim_keys = ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos']
+
+    print(f"Lowdim keys: {lowdim_keys} RGB keys: {rgb_keys}")
 
     # create zarr group
     root = zarr.group(store)
@@ -370,9 +362,9 @@ def _convert_data_to_replay(store, shape_meta, dataset_path, abs_action, rotatio
                 this_data = _convert_actions(
                     raw_actions=this_data,
                     abs_action=abs_action,
-                    rotation_transformer=rotation_transformer
+                    action_shape=shape_meta['action']['shape']
                 )
-                assert this_data.shape == (n_steps,) + tuple(shape_meta['action']['shape'])
+                assert this_data.shape == (n_steps,) + tuple(shape_meta['action']['shape']), f"Expected action shape {shape_meta['action']['shape']}, {n_steps} but got {this_data.shape}"
             else:
                 assert this_data.shape == (n_steps,) + tuple(shape_meta['obs'][key]['shape'])
             _ = data_group.array(
@@ -412,7 +404,14 @@ def _convert_data_to_replay(store, shape_meta, dataset_path, abs_action, rotatio
                     )
                     for episode_idx in range(len(demos)):
                         demo = demos[f'demo_{episode_idx}']
-                        hdf5_arr = demo['obs'][key]['color']
+                        if key == 'agentview':
+                            hdf5_arr = demo['obs'][key]['color']
+                        elif key == 'tactile':
+                            arr_2_img = demo['obs'][key]['finger_left']
+                            hdf5_arr = arr_2_img[:, 0, :, :] # take one of two tactile images
+                        else:
+                            raise ValueError(f"Unknown key {key} for RGB data")
+
                         for hdf5_idx in range(hdf5_arr.shape[0]):
                             if len(futures) >= max_inflight_tasks:
                                 # limit number of inflight tasks

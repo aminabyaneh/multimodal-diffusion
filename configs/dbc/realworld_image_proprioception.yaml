@@ -1,12 +1,12 @@
 pipeline_name: dbc_realworld_image
 
 # env
-env_name: realworld_image
+env_name: realworld_image_proprioception
 abs_action: false
-dataset_path: data/frankaslide.hdf5
+dataset_path: data/frankaslide_tactile.hdf5
 mode: train
 max_episode_steps: 400
-render_obs_key: 'agentview_image'
+
 shape_meta:
   action:
     shape:
@@ -18,7 +18,7 @@ shape_meta:
       - 224
       - 224
       type: rgb
-    ee_pose:
+    ee_pos:
       shape:
       - 3
       type: low_dim
@@ -30,9 +30,19 @@ shape_meta:
       shape:
       - 1
       type: low_dim
+
 action_dim: 7
-obs_steps: 2
+obs_steps: 1
 action_steps: 1
+
+# diffusion
+diffusion: edm
+solver: ${solvers.${diffusion}}
+solvers:
+  ddpm: null
+  edm: euler
+  sde: ode_dpmsolver++_2M
+  csde: ode_dpmsolver++_2M
 
 # obs_encoder
 rgb_model: resnet18
@@ -42,19 +52,19 @@ crop_shape:
   - 224
 random_crop: false
 use_group_norm: true
+
 use_seq: true
 
 # train
 device: cuda:0
 seed: 0
-gradient_steps: 500000
+gradient_steps: 1000000
 batch_size: 64
 horizon: 2
-nn: pearce_mlp # or dit
-diffusion: edm # or sde?
+nn: dit # pearce_mlp # or dit
 sample_steps: 50
 temperature: 1.0
-diffusion_x: true
+diffusion_x: false
 extra_sample_steps: 8
 
 # optimizer
@@ -69,12 +79,12 @@ save_path: logs
 project: tactile-rep
 group: dbc_realworld_image
 wandb_mode: online
-log_freq: 2000
-save_freq: 20000
+log_freq: 5000
+save_freq: 50000
 log_dir: logs
 
 # eval
-model_path: ckpt/edm_pearce_image/models/model_500000.pt
+model_path: ckpt/edm_dit_image/model_320000.pt # ckpt/edm_pearce_image/model_500000.pt
 
 # hydra
 hydra:

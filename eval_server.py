@@ -1,6 +1,4 @@
 """
-eval_server.py
-
 Starts a diffusion server which the client can query to get robot actions.
 Adopted from: https://github.com/moojink/openvla-oft/blob/main/vla-scripts/deploy.py
 """
@@ -39,6 +37,10 @@ def get_policy(args):
    # ---------------- Create Logger ----------------
     set_seed(args.seed)
     logger = Logger(pathlib.Path(args.log_dir), args)
+
+    # ---------------- Eval specific args ----------------
+    args.use_seq = True
+    args.obs_steps = 2
 
     # ---------------- Create Dataset ----------------
     dataset_path = os.path.expanduser(args.dataset_path)
@@ -145,28 +147,37 @@ class PolicyServer:
             solver = self.args.solver
 
             # normalize observation
-            print(f"Observation keys: {observation.keys()}")
-            obs = observation # ???
+            obs = observation
 
+            # explanation: the observation key for receiving data is full_image, but the normalizer and data expect it to be named agentview like robomimic
             obs_dict = {}
             for k in obs.keys():
-                obs_seq = obs[k].astype(np.float32)  # (num_envs, obs_steps, obs_dim)
-                nobs = self.dataset.normalizer['obs'][k].normalize(obs_seq)
-                obs_dict[k] = nobs = torch.tensor(nobs, device=self.args.device, dtype=torch.float32)  # (num_envs, obs_steps, obs_dim)
+                if k == "full_image": # named in client
+                    obs_seq = np.array(obs[k]).astype(np.float32)  # (1, obs_steps, obs_dim)
+                    normalizer_key = "agentview"
+                    print(self.dataset.normalizer['obs'].keys())
+                    nobs = self.dataset.normalizer['obs'][normalizer_key].normalize(obs_seq)
+                    nobs = nobs.reshape(224, 224, 3).transpose(2, 0, 1)
+                    nobs = np.expand_dims(nobs, axis=0)  # (1, 3, 224, 224)
+                    nobs = np.expand_dims(nobs, axis=0)  # (1, 1, 3, 224, 224)
+                    nobs = np.repeat(nobs, 2, axis=1)    # (1, 2, 3, 224, 224)
+                    print(f"Normalized observation shape: {nobs.shape}")
+                    obs_dict[normalizer_key] = nobs = torch.tensor(nobs, device=self.args.device, dtype=torch.float32)
 
             # form conditioning
             with torch.no_grad():
                 condition = obs_dict
                 if self.args.nn == "pearce_mlp":
-                    # run sampling (num_envs, action_dim)
+                    # run sampling (1, action_dim)
                     prior = torch.zeros((self.num_envs, self.args.action_dim), device=self.args.device)
                 elif self.args.nn == 'dit':
-                    # run sampling (num_envs, args.action_steps, action_dim)
+                    # run sampling (1, args.action_steps, action_dim)
                     prior = torch.zeros((self.num_envs, self.args.action_steps, self.args.action_dim), device=self.args.device)
                 else:
                     raise ValueError("NN type not supported")
 
                 if not self.args.diffusion_x:
+                    print(prior.shape, condition.keys())
                     naction, _ = self.agent.sample(prior=prior, n_samples=self.num_envs, sample_steps=self.args.sample_steps, solver=solver,
                                                    condition_cfg=condition, w_cfg=1.0, use_ema=True)
                 else:
@@ -181,8 +192,8 @@ class PolicyServer:
             if self.args.abs_action:
                 action = self.dataset.undo_transform_action(action)
 
+            action = action.squeeze()
             print(f"Action shape: {action.shape}, Action: {action}")
-            action = action
 
             if double_encode:
                 return JSONResponse(json_numpy.dumps(action))
@@ -206,7 +217,7 @@ class PolicyServer:
 @dataclass
 class DeployConfig:
     # server configuration
-    host: str = "10.122.196.156" # Host IP Address
+    host: str = "10.69.55.168" # Host IP Address
     port: int = 8777 # Host Port
 
 @draccus.wrap()
