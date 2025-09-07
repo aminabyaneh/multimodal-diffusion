@@ -1,16 +1,17 @@
-pipeline_name: dbc_realworld_image
+pipeline_name: cdp_realworld_image
 
 # env
 env_name: realworld_image_eef_pos
 abs_action: false
-dataset_path: data/frankaslide_tactile.hdf5
+dataset_path: data/frankapeg_rnd.hdf5
 mode: train
 max_episode_steps: 400
 
+# data
 shape_meta:
   action:
     shape:
-    - 3
+    - 6
   obs:
     agentview:
       shape:
@@ -22,22 +23,27 @@ shape_meta:
       shape:
       - 3
       type: low_dim
+    ee_euler:
+      shape:
+      - 3
+      type: low_dim
 
-action_dim: 3
-obs_steps: 1
-action_steps: 1
+action_dim: 6
+obs_steps: 4
+action_steps: 2
 
 # diffusion
-diffusion: edm
-solver: ${solvers.${diffusion}}
-solvers:
-  ddpm: null
-  edm: euler
-  sde: ode_dpmsolver++_2M
-  csde: ode_dpmsolver++_2M
+diffusion: edm # or csde for cdp
+solver: euler
+
+embedding_dim: 256 # image embedding dimension
+d_model: 320 # transformer model dimension
+n_heads: 10 # number of attention heads
+depth: 2 # number of transformer blocks
 
 # obs_encoder
 rgb_model: resnet18
+rgb_weights: IMAGENET1K_V1
 resize_shape: null
 crop_shape:
   - 224
@@ -49,20 +55,18 @@ use_seq: true
 # train
 device: cuda:0
 seed: 0
-gradient_steps: 250000
-batch_size: 128
-horizon: 2
+gradient_steps: 1000000
+batch_size: 64
+horizon: 4
 nn: dit
+val_ratio: 0.05
 sample_steps: 50
 temperature: 1.0
 diffusion_x: false
 extra_sample_steps: 8
 
 # optimizer
-lr: ${lrs.${nn}}
-lrs:
-  dit: 0.0001
-  pearce_mlp: 0.001
+lr: 0.0001
 
 # log
 exp_name: ${env_name}_${diffusion}_${nn}
@@ -71,11 +75,11 @@ project: tactile-rep
 group: dbc_realworld_image
 wandb_mode: online
 log_freq: 5000
-save_freq: 50000
+save_freq: 20000
 log_dir: logs
 
 # eval
-model_path: ckpt/edm_dit_image/model_320000.pt # ckpt/edm_pearce_image/model_500000.pt
+model_path: ckpt/dbc_peg_o4_a2_h4/model_220000.pt
 
 # hydra
 hydra:

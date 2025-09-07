@@ -7,17 +7,137 @@ handles logging of metrics, model checkpoints, and video recordings during train
 and evaluation.
 """
 
-import random
 import os
+from pyexpat import model
+import shutil
 import uuid
 import json
+import random
+
+import torch
+import numpy as np
+
+import torchvision
+import torch.nn as nn
+from typing import Callable
+
+import timm
 import wandb
 import wandb.sdk.data_types.video as wv
-import numpy as np
-import torch
+
+from PIL import Image
 from omegaconf import OmegaConf
 
 from cleandiffuser.env.wrapper import VideoRecordingWrapper
+
+
+def replace_submodules(
+        root_module: nn.Module,
+        predicate: Callable[[nn.Module], bool],
+        func: Callable[[nn.Module], nn.Module]) -> nn.Module:
+    """
+    predicate: Return true if the module is to be replaced.
+    func: Return new module to use.
+    """
+    if predicate(root_module):
+        return func(root_module)
+
+    bn_list = [k.split('.') for k, m
+        in root_module.named_modules(remove_duplicate=True)
+        if predicate(m)]
+    for *parent, k in bn_list:
+        parent_module = root_module
+        if len(parent) > 0:
+            parent_module = root_module.get_submodule('.'.join(parent))
+        if isinstance(parent_module, nn.Sequential):
+            src_module = parent_module[int(k)]
+        else:
+            src_module = getattr(parent_module, k)
+        tgt_module = func(src_module)
+        if isinstance(parent_module, nn.Sequential):
+            parent_module[int(k)] = tgt_module
+        else:
+            setattr(parent_module, k, tgt_module)
+    # verify that all BN are replaced
+    bn_list = [k.split('.') for k, m
+        in root_module.named_modules(remove_duplicate=True)
+        if predicate(m)]
+    assert len(bn_list) == 0
+    return root_module
+
+
+def freeze_all(model: nn.Module):
+    """
+    Freeze all parameters in the model.
+
+    Args:
+        model (nn.Module): The model to freeze.
+    """
+
+    for p in model.parameters():
+        p.requires_grad = False
+
+
+def set_trainable(module: nn.Module, trainable: bool = True):
+    """
+    Set the requires_grad attribute of all parameters in the module.
+
+    Args:
+        module (nn.Module): The module to modify.
+        trainable (bool): If True, set requires_grad to True, else False.
+    """
+
+    for p in module.parameters():
+        p.requires_grad = trainable
+
+
+def _get_head_module(model: nn.Module):
+    """
+    Get the head module of a model, if it exists.
+    """
+    # timm uses get_classifier() for the final head
+    if hasattr(model, "get_classifier"):
+        cls = model.get_classifier()
+        if isinstance(cls, nn.Module):
+            return cls
+    # fallbacks
+    for attr in ("head", "classifier", "fc", "mlp_head"):
+        if hasattr(model, attr) and isinstance(getattr(model, attr), nn.Module):
+            return getattr(model, attr)
+    return None
+
+
+def unfreeze_head_and_last_norm(model: nn.Module):
+    head = _get_head_module(model)
+    if head is not None:
+        set_trainable(head, True)
+
+    # DINOv2 ViTs usually have a final norm at model.norm or model.fc_norm
+    for attr in ("norm", "fc_norm"):
+        if hasattr(model, attr) and isinstance(getattr(model, attr), nn.Module):
+            set_trainable(getattr(model, attr), True)
+
+
+def get_vision_backbone(name: str, weights=None, ft: bool=True) -> nn.Module:
+    """
+    Get a vision backbone model from timm.
+
+    Args:
+        name (str): Name of the model to load from timm.
+        weights: Pretrained weights to load. If None, uses default pretrained weights.
+        ft (bool): If True, the model is set up for fine-tuning.
+    """
+    # create the rgb model
+    rgb_model = timm.create_model(name, pretrained=True)
+
+    if 'resnet' in name:
+        rgb_model.fc = torch.nn.Identity()
+    elif 'dinov2' in name:
+        if ft:
+            freeze_all(rgb_model)
+            unfreeze_head_and_last_norm(rgb_model)
+
+    return rgb_model
 
 
 def parse_cfg(cfg_path: str) -> OmegaConf:
@@ -48,7 +168,7 @@ def set_seed(seed: int):
 
 class Logger:
     """Primary logger object. Logs in wandb."""
-    def __init__(self, log_dir, cfg):
+    def __init__(self, log_dir, cfg, config=None):
         """
         Initializes the Logger object.
         This sets up the logging directories for metrics, models, and videos,
@@ -59,13 +179,18 @@ class Logger:
             cfg (OmegaConf): Configuration object containing logging parameters.
         """
         self._log_dir = make_dir(log_dir)
-        self._metrics_dir = make_dir(self._log_dir / 'metrics')
-        self._model_dir = make_dir(self._log_dir / 'models')
-        self._video_dir = make_dir(self._log_dir / 'videos')
         self._cfg = cfg
 
         # date and time based uuid
         self._uuid = f"{uuid.uuid4()}"
+
+        self._metrics_dir = make_dir(self._log_dir / 'metrics' / self._uuid)
+        self._model_dir = make_dir(self._log_dir / 'models' / self._uuid)
+        self._video_dir = make_dir(self._log_dir / 'videos' / self._uuid)
+
+        # save config file to models directory
+        if config is not None:
+            shutil.copy(config, self._model_dir / 'config.yaml')
 
         # initialize wandb
         wandb.init(
@@ -134,3 +259,54 @@ class Logger:
         """
         if self._wandb:
             self._wandb.finish()
+
+
+def crop_resize(img, is_depth=False, output_size=(224, 224), output_dtype=None):
+    """
+    Crop and resize images -> center crop to aspect ratio -> resize (like apply_transform).
+
+    Args:
+        img (PIL.Image or np.ndarray): Input image.
+        is_depth (bool): If True, use nearest-neighbor interpolation (for depth maps).
+        output_size (tuple): Target (width, height).
+        output_dtype (np.dtype): Optionally cast the result to this dtype.
+
+    Returns:
+        np.ndarray: Cropped and resized image as numpy array.
+    """
+
+    if is_depth:
+        # squeeze the last dimension if depth
+        img = img.squeeze()
+
+    if isinstance(img, np.ndarray):
+        img = Image.fromarray(img)
+
+    if is_depth:
+        img = img.convert("F")
+
+    # get dimensions
+    width, height = img.size
+    min_dim = min(width, height)
+
+    # define center crop box
+    left = (width - min_dim) // 2
+    top = (height - min_dim) // 2
+    right = left + min_dim
+    bottom = top + min_dim
+
+    # choose interpolation method
+    method = Image.NEAREST if is_depth else Image.BILINEAR
+
+    # crop and resize
+    img = img.crop((left, top, right, bottom))
+    img = img.resize(output_size, method)
+
+    # convert back to numpy
+    img_np = np.array(img)
+
+    # optional dtype cast
+    if output_dtype is not None and img_np.dtype != np.dtype(output_dtype):
+        img_np = img_np.astype(output_dtype)
+
+    return img_np
