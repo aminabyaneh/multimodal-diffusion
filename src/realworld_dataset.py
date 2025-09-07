@@ -1,20 +1,83 @@
-from typing import Dict
+""" Real world dataset loader.
+
+NOTE: The dataset keys are hardcoded for our native real-world dataset in hdf5 format,
+      double check before using other datasets.
+"""
+
 import torch
 import numpy as np
-import copy
-import pathlib
 import h5py
 import zarr
-from tqdm import tqdm
 import concurrent.futures
+import pdb
+
+from typing import Dict
+from tqdm import tqdm
 from collections import defaultdict
+
 from cleandiffuser.dataset.imagecodecs import register_codecs, Jpeg2k
 from cleandiffuser.dataset.base_dataset import BaseDataset
 from cleandiffuser.dataset.replay_buffer import ReplayBuffer
-from cleandiffuser.dataset.dataset_utils import SequenceSampler, RotationTransformer, dict_apply, \
-    MinMaxNormalizer, ImageNormalizer
+from cleandiffuser.dataset.dataset_utils import SequenceSampler, dict_apply
 
 register_codecs()
+
+
+class MinMaxNormalizer:
+    """
+        normalizes data through maximum and minimum expansion.
+    """
+
+    def __init__(self, X):
+        X = X.reshape(-1, X.shape[-1]).astype(np.float32)
+        self.min, self.max = np.min(X, axis=0), np.max(X, axis=0)
+        self.range = self.max - self.min
+        if np.any(self.range == 0):
+            self.range = self.max - self.min
+            print("Warning: Some features have the same min and max value. These will be set to 0.")
+            self.range[self.range == 0] = 1
+
+    def normalize(self, x):
+        x = x.astype(np.float32)
+        # nomalize to [0,1]
+        nx = (x - self.min) / self.range
+        # normalize to [-1, 1]
+        nx = nx * 2 - 1
+        return nx
+
+    def unnormalize(self, x):
+        x = x.astype(np.float32)
+        nx = (x + 1) / 2
+        x = nx * self.range + self.min
+        return x
+
+
+class ImageNormalizer:
+    """ Normalizes image data from range [0, 255] to [-1, 1].
+    """
+
+    def __init__(self):
+        pass
+
+    def normalize(self, x):
+        return ((x / 255.0) * 2.0) - 1.0
+
+    def unnormalize(self, x):
+        return ((x + 1.0) / 2.0) * 255.0
+
+
+class DepthNormalizer:
+    """ Normalizes depth data from range [0, max_depth] to [-1, 1].
+    """
+
+    def __init__(self, max_depth=1800.0):
+        self.max_depth = max_depth
+
+    def normalize(self, x):
+        return ((x * 2.0) / self.max_depth) - 1.0
+
+    def unnormalize(self, x):
+        return ((x + 1.0) * self.max_depth) / 2.0
 
 
 class RealWorldDataset(BaseDataset):
@@ -182,6 +245,7 @@ class RealWorldImageDataset(BaseDataset):
             # only take first k obs from images
             for key in rgb_keys + lowdim_keys:
                 key_first_k[key] = n_obs_steps
+
         self.sampler = SequenceSampler(
             replay_buffer=self.replay_buffer,
             sequence_length=horizon,
@@ -206,7 +270,14 @@ class RealWorldImageDataset(BaseDataset):
         for key in self.lowdim_keys:
             normalizer['obs'][key] = MinMaxNormalizer(self.replay_buffer[key][:])
         for key in self.rgb_keys:
-            normalizer['obs'][key] = ImageNormalizer()
+            if key == "depth": # depth image
+                normalizer['obs'][key] = DepthNormalizer(max_depth=1800.0)
+            elif key == "agentview": # rgb image
+                normalizer['obs'][key] = ImageNormalizer()
+            elif key == "tactile": # tactile image
+                normalizer['obs'][key] = ImageNormalizer()
+            else:
+                raise ValueError(f"Unknown rgb key {key} for normalizer")
         normalizer['action'] = MinMaxNormalizer(self.replay_buffer['action'][:])
 
         return normalizer
@@ -233,7 +304,7 @@ class RealWorldImageDataset(BaseDataset):
             # T,H,W,C
             # convert uint8 image to float32
             obs_dict[key] = np.moveaxis(sample[key][T_slice], -1, 1
-                                        ).astype(np.float32) / 255.
+                                        ).astype(np.float32)
             # T,C,H,W
             del sample[key]
             obs_dict[key] = self.normalizer['obs'][key].normalize(obs_dict[key])
@@ -362,7 +433,7 @@ def _convert_data_to_replay(store, shape_meta, dataset_path, abs_action,
                 this_data = _convert_actions(
                     raw_actions=this_data,
                     abs_action=abs_action,
-                    action_shape=shape_meta['action']['shape']
+                    action_shape=tuple(shape_meta['action']['shape'])[0]
                 )
                 assert this_data.shape == (n_steps,) + tuple(shape_meta['action']['shape']), f"Expected action shape {shape_meta['action']['shape']}, {n_steps} but got {this_data.shape}"
             else:
@@ -409,6 +480,11 @@ def _convert_data_to_replay(store, shape_meta, dataset_path, abs_action,
                         elif key == 'tactile':
                             arr_2_img = demo['obs'][key]['finger_left']
                             hdf5_arr = arr_2_img[:, 0, :, :] # take one of two tactile images
+                        elif key == "depth":
+                            hdf5_arr = demo['obs']['agentview'][key] # depth is under agentview in costumized dataset
+                            hdf5_arr = np.expand_dims(hdf5_arr, axis=-1) # add channel dim
+                            # repeat depth to make it 3 channel for resnet etc.
+                            hdf5_arr = np.repeat(hdf5_arr, 3, axis=-1)
                         else:
                             raise ValueError(f"Unknown key {key} for RGB data")
 

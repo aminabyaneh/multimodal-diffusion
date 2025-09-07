@@ -7,14 +7,18 @@ handles logging of metrics, model checkpoints, and video recordings during train
 and evaluation.
 """
 
-import random
 import os
 import uuid
 import json
+import random
+
+import torch
+import numpy as np
+
 import wandb
 import wandb.sdk.data_types.video as wv
-import numpy as np
-import torch
+
+from PIL import Image
 from omegaconf import OmegaConf
 
 from cleandiffuser.env.wrapper import VideoRecordingWrapper
@@ -134,3 +138,54 @@ class Logger:
         """
         if self._wandb:
             self._wandb.finish()
+
+
+def crop_resize(img, is_depth=False, output_size=(224, 224), output_dtype=None):
+    """
+    Crop and resize images -> center crop to aspect ratio -> resize (like apply_transform).
+
+    Args:
+        img (PIL.Image or np.ndarray): Input image.
+        is_depth (bool): If True, use nearest-neighbor interpolation (for depth maps).
+        output_size (tuple): Target (width, height).
+        output_dtype (np.dtype): Optionally cast the result to this dtype.
+
+    Returns:
+        np.ndarray: Cropped and resized image as numpy array.
+    """
+
+    if is_depth:
+        # squeeze the last dimension if depth
+        img = img.squeeze()
+
+    if isinstance(img, np.ndarray):
+        img = Image.fromarray(img)
+
+    if is_depth:
+        img = img.convert("F")
+
+    # get dimensions
+    width, height = img.size
+    min_dim = min(width, height)
+
+    # define center crop box
+    left = (width - min_dim) // 2
+    top = (height - min_dim) // 2
+    right = left + min_dim
+    bottom = top + min_dim
+
+    # choose interpolation method
+    method = Image.NEAREST if is_depth else Image.BILINEAR
+
+    # crop and resize
+    img = img.crop((left, top, right, bottom))
+    img = img.resize(output_size, method)
+
+    # convert back to numpy
+    img_np = np.array(img)
+
+    # optional dtype cast
+    if output_dtype is not None and img_np.dtype != np.dtype(output_dtype):
+        img_np = img_np.astype(output_dtype)
+
+    return img_np
