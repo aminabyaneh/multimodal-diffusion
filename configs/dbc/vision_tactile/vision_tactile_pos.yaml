@@ -1,46 +1,61 @@
-pipeline_name: dp_realworld_image
+pipeline_name: cdp_realworld_image
+
 # env
 env_name: realworld_image_eef_pos
 abs_action: false
-dataset_path: data/frankaslide_fix.hdf5
+dataset_path: data/circle_m_peg_insertion.hdf5
 mode: train
 max_episode_steps: 400
 
+# data
 shape_meta:
   action:
     shape:
-    - 4
+    - 3
   obs:
     agentview:
       shape:
       - 3
       - 224
       - 224
-      type: rgb
+      type: image_rgb
+    tactile:
+      shape:
+      - 3
+      - 384
+      - 288
+      type: image_tactile
     ee_pos:
       shape:
       - 3
       type: low_dim
-    gripper_state:
-      shape:
-      - 1
-      type: low_dim
 
-action_dim: 4
-obs_steps: 2
-action_steps: 8
+action_dim: 3
+obs_steps: 4
+action_steps: 2
 
 # diffusion
-diffusion: edm
+diffusion: edm # or csde for cdp
 solver: euler
 
+embedding_dim: 256 # image embedding dimension
+d_model: 320 # transformer model dimension
+n_heads: 10 # number of attention heads
+depth: 2 # number of transformer blocks
+
 # obs_encoder
-rgb_model: resnet18
+rgb_model: resnet18 # resnet18, resnet34, resnet50, vit_large_patch14_reg4_dinov2, vit_small_patch14_reg4_dinov2
 rgb_weights: IMAGENET1K_V1
-resize_shape: null
+conditioning: concat
+
+resize_shape:
+  - 224
+  - 224
+
 crop_shape:
   - 224
   - 224
+
 random_crop: false
 use_group_norm: true
 use_seq: true
@@ -49,10 +64,10 @@ use_seq: true
 device: cuda:0
 seed: 0
 gradient_steps: 500000
-batch_size: 64
-horizon: 10
-nn: chi_transformer
-val_ratio: 0.05
+batch_size: 32
+horizon: 4
+nn: dit
+val_ratio: 0.1
 sample_steps: 50
 temperature: 1.0
 diffusion_x: false
@@ -64,15 +79,15 @@ lr: 0.0001
 # log
 exp_name: ${env_name}_${diffusion}_${nn}
 save_path: logs
-project: tactile-rep
-group: dp_realworld_image
+project: diffusion-tactile
+group: dbc_realworld_image
 wandb_mode: online
 log_freq: 5000
 save_freq: 20000
 log_dir: logs
 
 # eval
-model_path: ckpt/edm_pearce_mlp/models/model_500000.pth
+model_path: ""
 
 # hydra
 hydra:

@@ -16,8 +16,9 @@ from cleandiffuser.dataset.dataset_utils import loop_dataloader
 from src.utils import set_seed, Logger
 from src.realworld_dataset import RealWorldImageDataset
 
-CONFIG_PATH = "configs/dbc/vision_tactile"
-CONFIG_NAME = "vision_tactile_pos_ori"
+BASE_CONFIG = "vision"
+CONFIG_PATH = f"configs/dbc/{BASE_CONFIG}/"
+CONFIG_NAME = f"{BASE_CONFIG}_pos"
 
 @hydra.main(config_path=CONFIG_PATH, config_name=CONFIG_NAME)
 def pipeline(args):

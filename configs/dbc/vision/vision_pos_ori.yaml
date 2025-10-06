@@ -3,7 +3,7 @@ pipeline_name: cdp_realworld_image
 # env
 env_name: realworld_image_eef_pos
 abs_action: false
-dataset_path: data/frankapeg_rnd.hdf5
+dataset_path: data/circle_m_peg_insertion.hdf5
 mode: train
 max_episode_steps: 400
 
@@ -18,7 +18,7 @@ shape_meta:
       - 3
       - 224
       - 224
-      type: rgb
+      type: image_rgb
     ee_pos:
       shape:
       - 3
@@ -42,12 +42,18 @@ n_heads: 10 # number of attention heads
 depth: 2 # number of transformer blocks
 
 # obs_encoder
-rgb_model: resnet18
+rgb_model: resnet18 # resnet18, resnet34, resnet50, vit_large_patch14_reg4_dinov2, vit_small_patch14_reg4_dinov2
 rgb_weights: IMAGENET1K_V1
-resize_shape: null
+conditioning: concat
+
+resize_shape:
+  - 224
+  - 224
+
 crop_shape:
   - 224
   - 224
+
 random_crop: false
 use_group_norm: true
 use_seq: true
@@ -55,11 +61,11 @@ use_seq: true
 # train
 device: cuda:0
 seed: 0
-gradient_steps: 1000000
-batch_size: 64
+gradient_steps: 500000
+batch_size: 32
 horizon: 4
 nn: dit
-val_ratio: 0.05
+val_ratio: 0.1
 sample_steps: 50
 temperature: 1.0
 diffusion_x: false
@@ -71,7 +77,7 @@ lr: 0.0001
 # log
 exp_name: ${env_name}_${diffusion}_${nn}
 save_path: logs
-project: tactile-rep
+project: diffusion-tactile
 group: dbc_realworld_image
 wandb_mode: online
 log_freq: 5000
@@ -79,7 +85,7 @@ save_freq: 20000
 log_dir: logs
 
 # eval
-model_path: ckpt/dbc_peg_o4_a2_h4/model_220000.pt
+model_path: ""
 
 # hydra
 hydra:

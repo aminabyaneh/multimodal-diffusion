@@ -8,7 +8,7 @@ import timm
 from cleandiffuser.utils.crop_randomizer import CropRandomizer
 from cleandiffuser.nn_condition import BaseNNCondition
 
-from utils import replace_submodules, get_vision_backbone
+from utils import replace_submodules, get_vit_backbone
 
 
 class MultiImageObsConditionFilm(BaseNNCondition):
@@ -56,7 +56,7 @@ class MultiImageObsConditionFilm(BaseNNCondition):
 
         # rgb_model
         if 'resnet' in rgb_model_name:
-            rgb_model = get_vision_backbone(rgb_model_name)
+            rgb_model = get_vit_backbone(rgb_model_name)
         elif 'dinov2' in rgb_model_name:
             rgb_model = timm.create_model(rgb_model_name, pretrained=True)
         else:

@@ -12,17 +12,20 @@ import numpy as np
 import torch
 
 from cleandiffuser.dataset.dataset_utils import loop_dataloader
-from cleandiffuser.utils import report_parameters
 
 from src.utils import set_seed, Logger
 from src.realworld_dataset import RealWorldImageDataset
 
+BASE_CONFIG = "vision"
+CONFIG_PATH = f"configs/dp/{BASE_CONFIG}/"
+CONFIG_NAME = f"{BASE_CONFIG}_pos"
 
-@hydra.main(config_path="configs/dp", config_name="realworld_image_eef_pos")
+@hydra.main(config_path=CONFIG_PATH, config_name=CONFIG_NAME)
 def pipeline(args):
     # ---------------- Startup Setups ----------------
     set_seed(args.seed)
-    logger = Logger(pathlib.Path(args.log_dir), args)
+    logger = Logger(pathlib.Path(args.log_dir), args,
+                    config=f"{CONFIG_PATH}/{CONFIG_NAME}.yaml")
 
     # ---------------- Create Dataset ----------------
     dataset_path = os.path.expanduser(args.dataset_path)
@@ -65,50 +68,35 @@ def pipeline(args):
     )
 
     # --------------- Create Diffusion Model -----------------
-    if args.nn == "chi_unet":
-        from cleandiffuser.nn_condition import MultiImageObsCondition
-        from cleandiffuser.nn_diffusion import ChiUNet1d
-
-        nn_condition = MultiImageObsCondition(
-            shape_meta=args.shape_meta, emb_dim=256, rgb_model_name=args.rgb_model, resize_shape=args.resize_shape,
-            crop_shape=args.crop_shape, random_crop=args.random_crop,
-            use_group_norm=args.use_group_norm, use_seq=args.use_seq).to(args.device)
-
-        nn_diffusion = ChiUNet1d(
-            args.action_dim, 256, args.obs_steps, model_dim=256, emb_dim=256, dim_mult=[1, 2, 2],
-            obs_as_global_cond=True, timestep_emb_type="positional").to(args.device)
-
-    elif args.nn == "chi_transformer":
-        from cleandiffuser.nn_condition import MultiImageObsCondition
+    if args.nn == "chi_transformer":
+        from src.vision_tactile_concat import MultiImageObsConditionConcat
         from cleandiffuser.nn_diffusion import ChiTransformer
 
-        # embedding_dim = 256 # image embedding dimension
-        # d_model = 256 # transformer model dimension
-        # n_heads = 4 # number of attention heads
-        # num_layers = 4 # number of transformer layers
+        embedding_dim = args.embedding_dim # image embedding dimension
+        d_model = args.d_model # transformer model dimension
+        n_heads = args.n_heads # number of attention heads
+        depth = args.depth # number of transformer layers
 
-        # More complex transformer
-        embedding_dim = 1024 # image embedding dimension
-        d_model = 256 # transformer model dimension
-        n_heads = 8 # number of attention heads
-        num_layers = 8 # number of transformer layers
-
-        nn_condition = MultiImageObsCondition(
-            shape_meta=args.shape_meta, emb_dim=embedding_dim, rgb_model_name=args.rgb_model, resize_shape=args.resize_shape,
-            crop_shape=args.crop_shape, random_crop=args.random_crop,
+        nn_condition = MultiImageObsConditionConcat(
+            shape_meta=args.shape_meta, emb_dim=embedding_dim, rgb_model_name=args.rgb_model,
+            resize_shape=args.resize_shape, crop_shape=args.crop_shape, random_crop=args.random_crop,
             use_group_norm=args.use_group_norm, use_seq=args.use_seq, keep_horizon_dims=True).to(args.device)
 
         nn_diffusion = ChiTransformer(
-            args.action_dim, embedding_dim, args.horizon, args.obs_steps, d_model=d_model, nhead=n_heads, num_layers=num_layers,
+            args.action_dim, embedding_dim, args.horizon, args.obs_steps, d_model=d_model, nhead=n_heads, num_layers=depth,
             timestep_emb_type="positional").to(args.device)
     else:
-        raise ValueError(f"Invalid nn type {args.nn}, only 'dit' is supported for now.")
+        raise ValueError(f"Invalid nn type {args.nn}, only 'chi_transformer' is supported for now.")
 
     print(f"======================= Parameter Report of Diffusion Model =======================")
-    report_parameters(nn_diffusion)
+    trainable_params = sum(p.numel() for p in nn_diffusion.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in nn_diffusion.parameters())
+    print(f"Trainable/total parameters: {trainable_params:,}/{total_params:,}")
     print(f"===================================================================================")
     print(f"======================= Parameter Report of Condition Model =======================")
-    report_parameters(nn_condition)
+    trainable_params = sum(p.numel() for p in nn_condition.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in nn_condition.parameters())
+    print(f"Trainable/total parameters: {trainable_params:,}/{total_params:,}")
     print(f"===================================================================================")
 
     if args.diffusion == "edm":
@@ -137,6 +125,7 @@ def pipeline(args):
 
         # get action
         naction = batch['action'].to(args.device)
+        naction = naction[:, -args.action_steps:, :]  # (B, action_steps, action_dim)
 
         # update diffusion
         diffusion_loss = agent.update(naction, condition)['loss']
@@ -165,6 +154,7 @@ def pipeline(args):
 
                     # get validation action
                     val_naction = val_batch['action'].to(args.device)
+                    val_naction = val_naction[:, -args.action_steps:, :] # (B, action_steps, action_dim)
 
                     val_diffusion_loss = agent.loss(val_naction, val_condition).item()
                     diffusion_loss_val_list.append(val_diffusion_loss)
@@ -176,7 +166,7 @@ def pipeline(args):
                         val_condition_n[k] = torch.tensor(obs_seq, device=args.device, dtype=torch.float32)  # (num_envs, obs_steps, obs_dim)
 
                     batch_size = val_naction.shape[0]
-                    prior = torch.zeros((batch_size, args.horizon, args.action_dim), device=args.device)
+                    prior = torch.zeros((batch_size, args.action_steps, args.action_dim), device=args.device)
 
                     # sample from ema model
                     naction, _ = agent.sample(prior=prior, n_samples=batch_size, sample_steps=args.sample_steps, solver=args.solver,

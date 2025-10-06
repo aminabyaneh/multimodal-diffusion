@@ -10,7 +10,7 @@ import timm
 from cleandiffuser.utils.crop_randomizer import CropRandomizer
 from cleandiffuser.nn_condition import BaseNNCondition
 
-from src.utils import replace_submodules, get_vision_backbone
+from src.utils import replace_submodules, get_vit_backbone
 
 
 class MultiImageObsConditionConcat(BaseNNCondition):
@@ -32,6 +32,7 @@ class MultiImageObsConditionConcat(BaseNNCondition):
     def __init__(self,
             shape_meta: dict,
             rgb_model_name: str, # resnet18, resnet34, resnet50, vit_large_patch14_reg4_dinov2, vit_small_patch14_reg4_dinov2
+            tactile_model_name: str = None, # resnet18, vit_large_patch14_reg4_dinov2, T3, Sparsh
             emb_dim: int = 256,
             resize_shape: Union[Tuple[int,int], Dict[str,tuple], None]=None,
             crop_shape: Union[Tuple[int,int], Dict[str,tuple], None]=None,
@@ -54,7 +55,11 @@ class MultiImageObsConditionConcat(BaseNNCondition):
         key_shape_map = dict()
 
         # rgb_model
-        rgb_model = get_vision_backbone(rgb_model_name)
+        rgb_model = get_vit_backbone(rgb_model_name)
+        if tactile_model_name is not None:
+            tactile_model = get_vit_backbone(tactile_model_name)
+        else:
+            tactile_model = rgb_model # use same architecture as vision for tactile
 
         obs_shape_meta = shape_meta['obs']
         for key, attr in obs_shape_meta.items():

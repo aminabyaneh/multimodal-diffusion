@@ -343,7 +343,7 @@ class DeployConfig:
         port: Host port to run the server on. Default is 8777.
     """
 
-    host: str = "localhost" # "10.69.55.168"
+    host: str = "10.69.55.168"
     port: int = 8777
     checkpoint_dir: str = "ckpt/peg_old_tactile_vision_eeposori/"
 

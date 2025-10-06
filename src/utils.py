@@ -23,12 +23,9 @@ from typing import Callable
 
 import timm
 import wandb
-import wandb.sdk.data_types.video as wv
 
 from PIL import Image
 from omegaconf import OmegaConf
-
-from cleandiffuser.env.wrapper import VideoRecordingWrapper
 
 
 def replace_submodules(
@@ -118,7 +115,7 @@ def unfreeze_head_and_last_norm(model: nn.Module):
             set_trainable(getattr(model, attr), True)
 
 
-def get_vision_backbone(name: str, weights=None, ft: bool=True) -> nn.Module:
+def get_vit_backbone(name: str, weights=None, ft: bool=True) -> nn.Module:
     """
     Get a vision backbone model from timm.
 
@@ -132,10 +129,27 @@ def get_vision_backbone(name: str, weights=None, ft: bool=True) -> nn.Module:
 
     if 'resnet' in name:
         rgb_model.fc = torch.nn.Identity()
+
+        # print trainable vs total parameters
+        total_params = sum(p.numel() for p in rgb_model.parameters())
+        trainable_params = sum(p.numel() for p in rgb_model.parameters() if p.requires_grad)
+
+        print(f"======================= Parameter Report of ResNet Backbone =======================")
+        print(f"ResNet: Total parameters: {total_params:,} | Trainable parameters: {trainable_params:,}")
+        print(f"===================================================================================")
+
     elif 'dinov2' in name:
         if ft:
             freeze_all(rgb_model)
             unfreeze_head_and_last_norm(rgb_model)
+
+        # print trainable vs total parameters
+        total_params = sum(p.numel() for p in rgb_model.parameters())
+        trainable_params = sum(p.numel() for p in rgb_model.parameters() if p.requires_grad)
+
+        print(f"======================= Parameter Report of Dino Backbone =======================")
+        print(f"DinoV2: Total parameters: {total_params:,} | Trainable parameters: {trainable_params:,}")
+        print(f"=================================================================================")
 
     return rgb_model
 
@@ -171,8 +185,8 @@ class Logger:
     def __init__(self, log_dir, cfg, config=None):
         """
         Initializes the Logger object.
-        This sets up the logging directories for metrics, models, and videos,
-        and initializes wandb for logging
+        This sets up the logging directories for metrics, models,
+        and initializes wandb for logging.
 
         Args:
             log_dir (str): The directory where logs will be stored.
@@ -184,9 +198,8 @@ class Logger:
         # date and time based uuid
         self._uuid = f"{uuid.uuid4()}"
 
-        self._metrics_dir = make_dir(self._log_dir / 'metrics' / self._uuid)
         self._model_dir = make_dir(self._log_dir / 'models' / self._uuid)
-        self._video_dir = make_dir(self._log_dir / 'videos' / self._uuid)
+        self._metrics_dir = self._model_dir  # save metrics in models dir
 
         # save config file to models directory
         if config is not None:
@@ -203,28 +216,6 @@ class Logger:
             dir=self._log_dir
         )
         self._wandb = wandb
-
-    def video_init(self, env, enable=False, video_id=""):
-        """
-        Initialize video recording for the environment.
-
-        Args:
-            env (VideoRecordingWrapper): The environment to record.
-            enable (bool, optional): Whether to enable video recording. Defaults to False.
-            video_id (str, optional): Identifier for the video file. Defaults to "".
-        """
-        # assert isinstance(env.env, VideoRecordingWrapper)
-        if isinstance(env.env, VideoRecordingWrapper):
-            video_env = env.env
-        else:
-            video_env = env
-
-        if enable:
-            video_env.video_recoder.stop()
-            video_filename = os.path.join(self._video_dir, f"{video_id}_{wv.util.generate_id()}.mp4")
-            video_env.file_path = str(video_filename)
-        else:
-            video_env.file_path = None
 
     def log(self, d: dict, category: str):
         """
