@@ -3,7 +3,7 @@ pipeline_name: cdp_realworld_image
 # env
 env_name: realworld_image_eef_pos
 abs_action: false
-dataset_path: data/circle_m_peg_insertion.hdf5
+dataset_path: data/circle_m_peg_insert_limited.hdf5
 mode: train
 max_episode_steps: 400
 
@@ -25,8 +25,8 @@ shape_meta:
       type: low_dim
 
 action_dim: 3
-obs_steps: 4
-action_steps: 8
+obs_steps: 8
+action_steps: 4
 
 # diffusion
 diffusion: edm
@@ -58,14 +58,12 @@ use_seq: true
 device: cuda:0
 seed: 0
 gradient_steps: 500000
-batch_size: 32
-horizon: 8
+batch_size: 16
+horizon: 11
 nn: chi_transformer
 val_ratio: 0.1
 sample_steps: 50
 temperature: 1.0
-diffusion_x: false
-extra_sample_steps: 8
 
 # optimizer
 lr: 0.0001
@@ -73,7 +71,7 @@ lr: 0.0001
 # log
 exp_name: ${env_name}_${diffusion}_${nn}
 save_path: logs
-project: tactile-rep
+project: diffusion-tactile
 group: dp_realworld_image
 wandb_mode: online
 log_freq: 5000

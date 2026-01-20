@@ -16,7 +16,6 @@ import torch
 import uvicorn
 
 from omegaconf import OmegaConf
-from torchvision.transforms.functional import resize
 
 import os
 import pathlib
@@ -98,14 +97,14 @@ def get_policy(args):
             timestep_emb_type="fourier").to(args.device)
 
     elif args.nn == "chi_transformer": # DP with Chi_Transformer backbone
-        from cleandiffuser.nn_condition import MultiImageObsCondition
+        from src.vision_tactile_concat import MultiImageObsConditionConcat as MultiImageObsCondition
         from cleandiffuser.nn_diffusion import ChiTransformer
 
         # Note: Dimensions fixed for now to match pretrained model
         embedding_dim = args.embedding_dim # image embedding dimension
         d_model = args.d_model # transformer model dimension
         n_heads = args.n_heads # number of attention heads
-        num_layers = args.num_layers # number of transformer layers
+        num_layers = args.depth # number of transformer layers
 
         nn_condition = MultiImageObsCondition(
             shape_meta=args.shape_meta, emb_dim=embedding_dim, rgb_model_name=args.rgb_model,
@@ -293,14 +292,17 @@ class PolicyServer:
                 condition = obs_dict
 
                 # only 1 action for real-world
-                prior = torch.zeros((self.num_envs, self.args.action_steps, self.args.action_dim), device=self.args.device)
+                prior = torch.zeros((self.num_envs, self.args.horizon, self.args.action_dim), device=self.args.device)
                 nactions, _ = self.agent.sample(prior=prior, n_samples=1, sample_steps=self.args.sample_steps, solver=solver,
                                                 condition_cfg=condition, w_cfg=1.0, use_ema=True)
 
             # unnormalize prediction
             nactions = nactions.detach().cpu().clip(-1., 1.).numpy()
             actions_pred = self.dataset.normalizer['action'].unnormalize(nactions)
-            actions = actions_pred.reshape(self.args.action_steps, self.num_envs, self.args.action_dim)
+            actions = actions_pred.reshape(self.args.horizon, self.num_envs, self.args.action_dim)
+
+            # send only the first self.args.action_steps actions
+            actions = actions[:self.args.action_steps, :, :]  # (action_steps, action_dim)
 
             if self.args.abs_action:
                 actions = self.dataset.undo_transform_action(actions)

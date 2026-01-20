@@ -16,7 +16,7 @@ from cleandiffuser.dataset.dataset_utils import loop_dataloader
 from src.utils import set_seed, Logger
 from src.realworld_dataset import RealWorldImageDataset
 
-BASE_CONFIG = "vision"
+BASE_CONFIG = "vision_tactile"
 CONFIG_PATH = f"configs/dbc/{BASE_CONFIG}/"
 CONFIG_NAME = f"{BASE_CONFIG}_pos"
 
@@ -86,6 +86,7 @@ def pipeline(args):
             args.action_dim, emb_dim=embedding_dim*args.obs_steps,
             d_model=d_model, n_heads=n_heads, depth=depth,
             timestep_emb_type="fourier").to(args.device)
+
     else:
         raise ValueError(f"Invalid nn type {args.nn}, only 'dit' is supported for now.")
 

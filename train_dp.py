@@ -16,7 +16,7 @@ from cleandiffuser.dataset.dataset_utils import loop_dataloader
 from src.utils import set_seed, Logger
 from src.realworld_dataset import RealWorldImageDataset
 
-BASE_CONFIG = "vision"
+BASE_CONFIG = "vision_tactile"
 CONFIG_PATH = f"configs/dp/{BASE_CONFIG}/"
 CONFIG_NAME = f"{BASE_CONFIG}_pos"
 
@@ -82,9 +82,9 @@ def pipeline(args):
             resize_shape=args.resize_shape, crop_shape=args.crop_shape, random_crop=args.random_crop,
             use_group_norm=args.use_group_norm, use_seq=args.use_seq, keep_horizon_dims=True).to(args.device)
 
-        nn_diffusion = ChiTransformer(
-            args.action_dim, embedding_dim, args.horizon, args.obs_steps, d_model=d_model, nhead=n_heads, num_layers=depth,
-            timestep_emb_type="positional").to(args.device)
+        nn_diffusion = ChiTransformer(args.action_dim, embedding_dim, args.horizon, args.obs_steps,
+                                      d_model=d_model, nhead=n_heads, num_layers=depth,
+                                      timestep_emb_type="positional").to(args.device)
     else:
         raise ValueError(f"Invalid nn type {args.nn}, only 'chi_transformer' is supported for now.")
 
@@ -93,6 +93,7 @@ def pipeline(args):
     total_params = sum(p.numel() for p in nn_diffusion.parameters())
     print(f"Trainable/total parameters: {trainable_params:,}/{total_params:,}")
     print(f"===================================================================================")
+
     print(f"======================= Parameter Report of Condition Model =======================")
     trainable_params = sum(p.numel() for p in nn_condition.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in nn_condition.parameters())
@@ -125,7 +126,6 @@ def pipeline(args):
 
         # get action
         naction = batch['action'].to(args.device)
-        naction = naction[:, -args.action_steps:, :]  # (B, action_steps, action_dim)
 
         # update diffusion
         diffusion_loss = agent.update(naction, condition)['loss']
@@ -154,7 +154,6 @@ def pipeline(args):
 
                     # get validation action
                     val_naction = val_batch['action'].to(args.device)
-                    val_naction = val_naction[:, -args.action_steps:, :] # (B, action_steps, action_dim)
 
                     val_diffusion_loss = agent.loss(val_naction, val_condition).item()
                     diffusion_loss_val_list.append(val_diffusion_loss)
@@ -166,11 +165,11 @@ def pipeline(args):
                         val_condition_n[k] = torch.tensor(obs_seq, device=args.device, dtype=torch.float32)  # (num_envs, obs_steps, obs_dim)
 
                     batch_size = val_naction.shape[0]
-                    prior = torch.zeros((batch_size, args.action_steps, args.action_dim), device=args.device)
+                    prior = torch.zeros((batch_size, args.horizon, args.action_dim), device=args.device)
 
                     # sample from ema model
                     naction, _ = agent.sample(prior=prior, n_samples=batch_size, sample_steps=args.sample_steps, solver=args.solver,
-                                                condition_cfg=val_condition_n, w_cfg=1.0, use_ema=True)
+                                              condition_cfg=val_condition_n, w_cfg=1.0, use_ema=True)
 
                     # unnormalize prediction
                     action_pred = naction.detach().to('cpu').clip(-1., 1.).numpy()  # (num_envs, action_dim)
