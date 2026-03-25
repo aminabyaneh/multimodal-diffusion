@@ -6,7 +6,8 @@ outputs/
 /results
 /wandb
 *.pt
-.claude
+.claude/*
+*.json
 
 # *.ipynb
 *.gif

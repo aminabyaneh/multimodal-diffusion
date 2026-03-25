@@ -65,17 +65,19 @@ class MultiImageObsConditionConcat(BaseNNCondition):
             type = attr.get('type', 'low_dim')
             key_shape_map[key] = shape
 
-            if type == 'image_rgb' or type == 'image_tactile': # treat tactile as image input
+            if type == 'image_rgb' or type == 'image_tactile':
                 rgb_keys.append(key)
                 # configure model for this key
+                # use the appropriate backbone based on modality
+                base_model = tactile_model if type == 'image_tactile' else rgb_model
                 this_model = None
-                if isinstance(rgb_model, dict):
+                if isinstance(base_model, dict):
                     # have provided model for each key
-                    this_model = rgb_model[key]
+                    this_model = base_model[key]
                 else:
-                    assert isinstance(rgb_model, nn.Module)
-                    # have a copy of the rgb model
-                    this_model = copy.deepcopy(rgb_model)
+                    assert isinstance(base_model, nn.Module)
+                    # have a copy of the model
+                    this_model = copy.deepcopy(base_model)
 
                 if this_model is not None:
                     if use_group_norm:
@@ -169,9 +171,11 @@ class MultiImageObsConditionConcat(BaseNNCondition):
             assert img.shape[1:] == self.key_shape_map[key]
             img = self.key_transform_map[key](img)
 
-            # check for input mismatch
-            if (input_size := getattr(self.key_model_map[key], "default_cfg", None)["input_size"]) != img.shape[1:]:
-                img = torchvision.transforms.Resize(size=input_size[2:])(img)
+            # check for input mismatch and resize if needed
+            default_cfg = getattr(self.key_model_map[key], "default_cfg", None)
+            if default_cfg is not None and (input_size := default_cfg.get("input_size")) is not None:
+                if tuple(input_size) != tuple(img.shape[1:]):
+                    img = torchvision.transforms.Resize(size=input_size[1:])(img)
 
             feature = self.key_model_map[key](img)
             features.append(feature)
