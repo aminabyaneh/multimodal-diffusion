@@ -122,7 +122,7 @@ if __name__ == "__main__":
     parser.add_argument('--checkpoint_dir', type=str, required=True, help='Directory for model checkpoints')
     args = parser.parse_args()
 
-    # load the confige file in the checkpoint directory
+    # load the config file in the checkpoint directory
     cfg = OmegaConf.load(args.checkpoint_dir + "/config.yaml")
 
     Config.ACTION_STEPS = cfg.action_steps

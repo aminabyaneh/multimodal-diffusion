@@ -2,11 +2,11 @@
 ckpt/
 libs/
 dev_pipelines/
-scripts/
 outputs/
 /results
 /wandb
 *.pt
+.claude
 
 # *.ipynb
 *.gif

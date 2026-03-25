@@ -1,11 +1,10 @@
 import os
-import pdb
 import time
 import hydra
 import pathlib
 
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore')  # suppress verbose hydra/torch deprecation noise
 
 import numpy as np
 
@@ -13,19 +12,22 @@ import torch
 
 from cleandiffuser.dataset.dataset_utils import loop_dataloader
 
-from src.utils import set_seed, Logger
-from src.realworld_dataset import RealWorldImageDataset
+from source.utils import set_seed, Logger
+from source.realworld_dataset import RealWorldImageDataset
 
 BASE_CONFIG = "vision_tactile"
-CONFIG_PATH = f"configs/dbc/{BASE_CONFIG}/"
+# Hydra resolves config_path relative to this file; configs/ lives one level up
+CONFIG_PATH_HYDRA = f"../configs/dbc/{BASE_CONFIG}"
+# Logger copies the config file at runtime; path is relative to the working directory
+CONFIG_PATH_CWD = f"configs/dbc/{BASE_CONFIG}"
 CONFIG_NAME = f"{BASE_CONFIG}_pos"
 
-@hydra.main(config_path=CONFIG_PATH, config_name=CONFIG_NAME)
+@hydra.main(config_path=CONFIG_PATH_HYDRA, config_name=CONFIG_NAME)
 def pipeline(args):
     # ---------------- Startup Setups ----------------
     set_seed(args.seed)
     logger = Logger(pathlib.Path(args.log_dir), args,
-                    config=f"{CONFIG_PATH}/{CONFIG_NAME}.yaml")
+                    config=f"{CONFIG_PATH_CWD}/{CONFIG_NAME}.yaml")
 
     # ---------------- Create Dataset ----------------
     dataset_path = os.path.expanduser(args.dataset_path)
@@ -48,7 +50,6 @@ def pipeline(args):
     dataset = train_dataset
     print(f"Train dataset size: {len(train_dataset)}, Validation dataset size: {len(val_dataset)}")
 
-    print(dataset)
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -69,7 +70,7 @@ def pipeline(args):
 
     # --------------- Create Diffusion Model -----------------
     if args.nn == "dit":
-        from src.vision_tactile_concat import MultiImageObsConditionConcat
+        from source.vision_tactile_concat import MultiImageObsConditionConcat
         from cleandiffuser.nn_diffusion import DiT1d
 
         embedding_dim = args.embedding_dim # image embedding dimension
@@ -208,10 +209,6 @@ def pipeline(args):
 
 if __name__ == "__main__":
     pipeline()
-
-
-
-
 
 
 

@@ -26,18 +26,18 @@ class Config:
     # server configuration
     SERVER_URL = "http://10.69.55.168:8777"
 
-    # task configuration # NOTE: not used for diffusion
-    # INSTRUCTION = "Slide the red cylinder across the table."
+    # task configuration
     INSTRUCTION = "Insert the peg in the black and green base."
 
-    # home pose
-    # HOME_POSE = torch.tensor([-0.0260, -0.7624,  0.0107, -2.7911, -0.0107,  2.0186,  0.7964])   #slide task start
-    HOME_POSE = torch.tensor([-0.0118, -0.3328, -0.0143, -2.7930, -0.0147, 2.4418, 0.7587])   #peg-insertion start
-
+    # home pose (joint configuration for task start)
+    HOME_POSE = torch.tensor([-0.0118, -0.3328, -0.0143, -2.7930, -0.0147, 2.4418, 0.7587])
 
     # robot configuration
     FRANKA_IP = "172.16.0.1"
     GRIPPER_IP = "172.16.0.4"
+
+    # digit tactile sensor serial number
+    DIGIT_SERIAL = "D20050"
 
     # gripper parameters
     GRIPPER_SPEED = 0.1
@@ -45,8 +45,8 @@ class Config:
     GRIPPER_MAX_WIDTH = 0.08570
     GRIPPER_TOLERANCE = 0.01
 
-    ACTION_STEPS = 2 # number of actions to execute at each step
-    OBS_STEPS = 4 # number of observations to send
+    ACTION_STEPS = 2  # number of actions to execute at each step
+    OBS_STEPS = 4     # number of observations to send
 
 
 # create config instance
@@ -207,8 +207,6 @@ def get_observation(pipeline, robot, digit):
     depth_image = np.zeros((480, 640, 1), dtype=np.float32) if not depth_frame else np.asanyarray(depth_frame.get_data())
     tactile_image = np.zeros((384, 288, 3), dtype=np.uint8) if not tactile_frame else np.asanyarray(tactile_frame.get_data())
 
-    print("Tactile image shape:", tactile_image.shape)
-
     rgb_color_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
 
     # convert to proper data types
@@ -276,7 +274,6 @@ def apply_action(actions, executor, num_actions, step_time=0.2):
     """
     for action in actions[:num_actions]:
         executor.send_action(action.squeeze())
-        # time.sleep(step_time)
 
 
 def main():
@@ -285,9 +282,6 @@ def main():
 
     # initialize robot interfaces
     robot = RobotInterface(ip_address=configs.FRANKA_IP)
-    # robot.set_home_pose(configs.HOME_POSE)
-    # robot.go_home()
-
     gripper = GripperInterface(ip_address=configs.GRIPPER_IP)
     gripper_state = 0  # 1: open, 0: closed
     robot.start_cartesian_impedance()
@@ -300,8 +294,7 @@ def main():
     pipeline.start(rs_config)
 
     # initialize digit tactile sensor
-    serial_number = "D20050"
-    digit = Digit(serial_number)
+    digit = Digit(configs.DIGIT_SERIAL)
     digit.connect()
 
     # initialize action executor

@@ -28,10 +28,10 @@ from typing import Any, Dict
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from src.realworld_dataset import RealWorldImageDataset
+from source.realworld_dataset import RealWorldImageDataset
 from cleandiffuser.utils import report_parameters
 
-from src.utils import set_seed, crop_resize
+from source.utils import set_seed, crop_resize
 
 
 def get_policy(args):
@@ -69,14 +69,14 @@ def get_policy(args):
         depth = args.depth # number of transformer blocks
 
         if args.conditioning == "concat":
-            from src.vision_tactile_concat import MultiImageObsConditionConcat as MultiImageObsCondition
+            from source.vision_tactile_concat import MultiImageObsConditionConcat as MultiImageObsCondition
             nn_condition = MultiImageObsCondition( shape_meta=args.shape_meta, emb_dim=embedding_dim, rgb_model_name=args.rgb_model,
                                                   resize_shape=args.resize_shape, crop_shape=args.crop_shape,
                                                   random_crop=args.random_crop, use_group_norm=args.use_group_norm,
                                                   use_seq=args.use_seq).to(args.device)
 
         elif args.conditioning == "film":
-            from src.vision_tactile_film import MultiImageObsConditionFilm as MultiImageObsCondition
+            from source.vision_tactile_film import MultiImageObsConditionFilm as MultiImageObsCondition
             nn_condition = None # TODO: implement FiLM conditioning
 
         else:
@@ -97,7 +97,7 @@ def get_policy(args):
             timestep_emb_type="fourier").to(args.device)
 
     elif args.nn == "chi_transformer": # DP with Chi_Transformer backbone
-        from src.vision_tactile_concat import MultiImageObsConditionConcat as MultiImageObsCondition
+        from source.vision_tactile_concat import MultiImageObsConditionConcat as MultiImageObsCondition
         from cleandiffuser.nn_diffusion import ChiTransformer
 
         # Note: Dimensions fixed for now to match pretrained model
@@ -128,7 +128,7 @@ def get_policy(args):
 
     # ----------------- Diffusion Agent ----------------------
     if args.diffusion == "sde":
-        from src.contraction_diffusion import DiscreteDiffusionSDE as SDE
+        from source.contraction_diffusion import DiscreteDiffusionSDE as SDE
         args.diffusion_x = False  # SDE does not support diffusion_x
         agent = SDE(nn_diffusion, nn_condition, predict_noise=False,
                     optim_params={"lr": args.lr},
@@ -314,7 +314,7 @@ class PolicyServer:
             else:
                 return JSONResponse(actions)
 
-        except:  # noqa: E722
+        except Exception:
             logging.error(traceback.format_exc())
             logging.warning(
                 "Your request threw an error; make sure your request complies with the expected format:\n"
@@ -357,7 +357,7 @@ def deploy(cfg: DeployConfig) -> None:
     Args:
         cfg: Configuration for the server (host, port).
     """
-    # load the confige file in the checkpoint directory
+    # load the config file in the checkpoint directory
     loaded_args = OmegaConf.load(cfg.checkpoint_dir + "/config.yaml")
     loaded_args.model_path = cfg.checkpoint_dir + "/model.pt"
 

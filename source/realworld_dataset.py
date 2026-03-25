@@ -9,7 +9,6 @@ import numpy as np
 import h5py
 import zarr
 import concurrent.futures
-import pdb
 
 from typing import Dict
 from tqdm import tqdm
@@ -519,6 +518,4 @@ if __name__ == "__main__":
     path = "data/frankaslide.hdf5"
     dataset = RealWorldDataset(dataset_dir=path)
     print(dataset)
-
-
 

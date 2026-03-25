@@ -1,4 +1,3 @@
-import pdb
 from typing import Dict, Tuple, Union, Callable
 import copy
 import torch
@@ -6,39 +5,40 @@ import torch.nn as nn
 import torchvision
 import timm
 
-
 from cleandiffuser.utils.crop_randomizer import CropRandomizer
 from cleandiffuser.nn_condition import BaseNNCondition
 
-from src.utils import replace_submodules, get_vit_backbone
+from source.utils import replace_submodules, get_vit_backbone
 
 
-class MultiImageObsConditionConcat(BaseNNCondition):
+class MultiImageObsConditionFilm(BaseNNCondition):
+
     """
-    Multi-modal observation condition encoder that concatenates vision and tactile features.
 
-    Processes RGB images and tactile data through separate encoders, then concatenates
-    the resulting features for downstream conditioning.
+    TODO: Implement FiLM conditioning!!!!!!!!!!!!!!!
 
-    Args:
-        condition: Dictionary of observations with keys mapping to tensors
-                  - RGB/tactile images: (B, C, H, W) or (B, seq_len, C, H, W)
-                  - Low-dim features: (B, D) or (B, seq_len, D)
-        mask: Optional mask tensor (B, *mask_shape) or None
 
-    Returns:
-        condition: Concatenated feature tensor (B, *cond_out_shape)
+    Input:
+        - condition: {"cond1": (b, *cond1_shape), "cond2": (b, *cond2_shape), ...} or (b, *cond_in_shape)
+        - mask :     (b, *mask_shape) or None, None means no mask
+
+    Output:
+        - condition: (b, *cond_out_shape)
+
+    Assumes rgb input: B, C, H, W or B, seq_len, C,H,W
+    Assumes low_dim input: B, D or B, seq_len, D
     """
     def __init__(self,
             shape_meta: dict,
             rgb_model_name: str, # resnet18, resnet34, resnet50, vit_large_patch14_reg4_dinov2, vit_small_patch14_reg4_dinov2
-            tactile_model_name: str = None, # resnet18, vit_large_patch14_reg4_dinov2, T3, Sparsh
             emb_dim: int = 256,
             resize_shape: Union[Tuple[int,int], Dict[str,tuple], None]=None,
             crop_shape: Union[Tuple[int,int], Dict[str,tuple], None]=None,
             random_crop: bool=True,
             # replace BatchNorm with GroupNorm
             use_group_norm: bool=False,
+            # use single rgb model for all rgb inputs
+            share_rgb_model: bool=False,
             # renormalize rgb input with imagenet normalization
             # assuming input in [0,1]
             imagenet_norm: bool=False,
@@ -55,30 +55,35 @@ class MultiImageObsConditionConcat(BaseNNCondition):
         key_shape_map = dict()
 
         # rgb_model
-        rgb_model = get_vit_backbone(rgb_model_name)
-        if tactile_model_name is not None:
-            tactile_model = get_vit_backbone(tactile_model_name)
+        if 'resnet' in rgb_model_name:
+            rgb_model = get_vit_backbone(rgb_model_name)
+        elif 'dinov2' in rgb_model_name:
+            rgb_model = timm.create_model(rgb_model_name, pretrained=True)
         else:
-            tactile_model = rgb_model # use same architecture as vision for tactile
+            raise ValueError("Fatal rgb_model")
+
+        # handle sharing vision backbone
+        if share_rgb_model:
+            assert isinstance(rgb_model, nn.Module)
+            key_model_map['rgb'] = rgb_model
 
         obs_shape_meta = shape_meta['obs']
         for key, attr in obs_shape_meta.items():
-            # print(key, attr)
             shape = tuple(attr['shape'])
             type = attr.get('type', 'low_dim')
             key_shape_map[key] = shape
-
-            if type == 'image_rgb' or type == 'image_tactile': # treat tactile as image input
+            if type == 'image_rgb' or type == 'image_tactile':
                 rgb_keys.append(key)
                 # configure model for this key
                 this_model = None
-                if isinstance(rgb_model, dict):
-                    # have provided model for each key
-                    this_model = rgb_model[key]
-                else:
-                    assert isinstance(rgb_model, nn.Module)
-                    # have a copy of the rgb model
-                    this_model = copy.deepcopy(rgb_model)
+                if not share_rgb_model:
+                    if isinstance(rgb_model, dict):
+                        # have provided model for each key
+                        this_model = rgb_model[key]
+                    else:
+                        assert isinstance(rgb_model, nn.Module)
+                        # have a copy of the rgb model
+                        this_model = copy.deepcopy(rgb_model)
 
                 if this_model is not None:
                     if use_group_norm:
@@ -94,7 +99,6 @@ class MultiImageObsConditionConcat(BaseNNCondition):
                 # configure resize
                 input_shape = shape
                 this_resizer = nn.Identity()
-                # If resize_shape provided use that, otherwise try to infer from model
                 if resize_shape is not None:
                     if isinstance(resize_shape, dict):
                         h, w = resize_shape[key]
@@ -142,13 +146,13 @@ class MultiImageObsConditionConcat(BaseNNCondition):
         self.shape_meta = shape_meta
         self.key_model_map = key_model_map
         self.key_transform_map = key_transform_map
+        self.share_rgb_model = share_rgb_model
         self.rgb_keys = rgb_keys
         self.low_dim_keys = low_dim_keys
         self.key_shape_map = key_shape_map
 
         self.use_seq = use_seq
         self.keep_horizon_dims = keep_horizon_dims
-
         self.mlp = nn.Sequential(
             nn.Linear(self.output_shape(), emb_dim), nn.LeakyReLU(), nn.Linear(emb_dim, emb_dim))
 
@@ -162,22 +166,41 @@ class MultiImageObsConditionConcat(BaseNNCondition):
                 obs_dict[k] = obs_dict[k].flatten(end_dim=1)
 
         # process rgb input
-        # run each rgb obs to independent models
-        for key in self.rgb_keys:
-            img = obs_dict[key]
-            if batch_size is None:
-                batch_size = img.shape[0]
-            else:
-                assert batch_size == img.shape[0]
-            assert img.shape[1:] == self.key_shape_map[key]
-            img = self.key_transform_map[key](img)
-
-            # check for input mismatch
-            if (input_size := getattr(self.key_model_map[key], "default_cfg", None)["input_size"]) != img.shape[1:]:
-                img = torchvision.transforms.Resize(size=input_size[2:])(img)
-
-            feature = self.key_model_map[key](img)
+        if self.share_rgb_model:
+            # pass all rgb obs to rgb model
+            imgs = list()
+            for key in self.rgb_keys:
+                img = obs_dict[key]
+                if batch_size is None:
+                    batch_size = img.shape[0]
+                else:
+                    assert batch_size == img.shape[0]
+                assert img.shape[1:] == self.key_shape_map[key]
+                img = self.key_transform_map[key](img)
+                imgs.append(img)
+            # (N*B,C,H,W)
+            imgs = torch.cat(imgs, dim=0)
+            # (N*B,D)
+            feature = self.key_model_map['rgb'](imgs)
+            # (N,B,D)
+            feature = feature.reshape(-1,batch_size,*feature.shape[1:])
+            # (B,N,D)
+            feature = torch.moveaxis(feature,0,1)
+            # (B,N*D)
+            feature = feature.reshape(batch_size,-1)
             features.append(feature)
+        else:
+            # run each rgb obs to independent models
+            for key in self.rgb_keys:
+                img = obs_dict[key]
+                if batch_size is None:
+                    batch_size = img.shape[0]
+                else:
+                    assert batch_size == img.shape[0]
+                assert img.shape[1:] == self.key_shape_map[key]
+                img = self.key_transform_map[key](img)
+                feature = self.key_model_map[key](img)
+                features.append(feature)
 
         # process lowdim input
         for key in self.low_dim_keys:

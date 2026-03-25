@@ -8,7 +8,6 @@ and evaluation.
 """
 
 import os
-from pyexpat import model
 import shutil
 import uuid
 import json
@@ -17,7 +16,6 @@ import random
 import torch
 import numpy as np
 
-import torchvision
 import torch.nn as nn
 from typing import Callable
 
@@ -175,6 +173,7 @@ def make_dir(dir_path):
 
 
 def set_seed(seed: int):
+    """Set random seeds for PyTorch, NumPy, and Python's random module for reproducibility."""
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -242,7 +241,7 @@ class Logger:
     def save_agent(self, agent=None, identifier='final'):
         if agent:
             fp = self._model_dir / f'model_{str(identifier)}.pt'
-        agent.save(fp)
+            agent.save(fp)
 
     def finish(self):
         """
